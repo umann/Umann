@@ -1,0 +1,6 @@
+Revision history for Perl extension Umann.
+
+0.01  Sat Aug 27 16:31:06 2016
+	- original version; created by h2xs 1.23 with options
+		-AX --skip-exporter --use-new-tests -b 5.10.0 -O -n Umann
+
