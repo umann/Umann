@@ -9,19 +9,39 @@ our $VERSION = '0.01';
 
 use Carp;
 use Data::Dump qw(dump);
+use Cwd qw(realpath);
+use English qw($OSNAME -no_match_vars);
+use List::MoreUtils qw(any);
 use Umann::List::Util qw(to_array);
 use Umann::Scalar::Util qw(
-    is_ar 
-    is_cr 
-    is_hr 
-    is_re 
+    is_ar
+    is_cr
+    is_hr
+    is_re
     is_sr
+    undef_safe_eq
 );
+
+use Readonly;
+
+Readonly my $CALLER_SUBROUTINE => 3;
+Readonly my $MORE_THAN_ENOUGH  => 20;
+Readonly my $UNDEF             => undef;
 
 use Exporter qw(import);
 our @EXPORT_OK = qw(
     deep_copy
+    flat_dump
     leaf
+    report_ref
+    sub_name
+    is_in
+    is_valid
+    act_on
+    hr_minus
+    hr_grep
+    put_first
+    canonpath
 );
 
 sub leaf {
@@ -29,99 +49,171 @@ sub leaf {
 
     my $struct = shift @args;
     if (@args = to_array(@args)) {
-        my $key = shift(@args) // return undef;
-        return 
-            is_hr($struct)
-            ?
-            leaf($struct->{$key}, @args)
-            :
-            is_ar($struct)
-            ?
+        my $key = shift(@args) // return $UNDEF;
+        return is_hr($struct)
+            ? leaf($struct->{$key}, @args)
+            : is_ar($struct) ?
+## no critic(RequireCheckingReturnValueOfEval)
             leaf(eval { $struct->[$key] }, @args)
-                                  # eval cos $x[-4] would die on @x=(1, 2);
-            :
-            undef
-        ;
+## use critic
+            # eval cos $x[-4] would die on @x=(1, 2);
+            : undef;
     }
     return $struct;
 }
 
 sub deep_copy {
     my @these = @_;
-    if(1 != scalar @these) {
+    if (1 != scalar @these) {
         return (map { deep_copy($_) } @these);
     }
     my $this = shift @these;
-    
-    return 
-        is_ar($this) ? [map deep_copy($_), @{$this}]                         :
-        is_hr($this) ? +{map { $_ => deep_copy($this->{$_}) } keys %{$this}} :
-        is_cr($this) ? sub{&{$this}}                                         :
-        is_sr($this) ? do { my $x = ${$this}; \$x }                            :
-        is_re($this) ? qr/$this/                                             :
-                       $this
-    ;
+
+    return
+          is_ar($this) ? [ map { deep_copy($_) } @{$this} ]
+        : is_hr($this) ? +{ map { $_ => deep_copy($this->{$_}) } keys %{$this} }
+        : is_cr($this) ? sub { &{$this} }
+        : is_sr($this) ? do { my $x = ${$this}; \$x }
+        : is_re($this) ? qr/$this/smx
+        :                $this;
 }
 
-1;
+sub sub_name {
+    my $level = shift // 0;
 
-__END__
-#cartesian([1,2], [3,4]) => ([1,3], [1,4], [2,3], [2,4])
-#cartesian([3,4], [5,6]) => ([3,5], [4,5], [3,6], [4,6])
-#cartesian([1,2], [3,4], [5,6]) => ([1,3,5], [1,4,5], [1,3,6], [1,4,6], [2,3,5], [2,4,5], [2,3,6], [2,4,6])
-#cartesian([0,1,2], [3,4]) => ([0,3], [0,4], [1,3], [1,4], [2,3], [2,4])
-#sub cartesian {
-#    my @ars = @_;
-#    return if (!@ars);
-#    my $ar = shift @ars;
-#    return map { [$_] } @{$ar} if (!@ars);
-#    my @left = cartesian(@ars);
-#    my @rv;
-#    for my $item (@{$ar}) {
-#        for my $left_ar (@left) {
-#            push @rv, [ $item, @{$left_ar} ];
-#        }
-#    }
-#    return @rv;
-#}
-#
-#sub cartesian_sprintf {
-#    my ($format, @args) = @_;
-#    carp 'cartesian_sprintf arg number mismatch'
-#        if (@args != $format =~ s/%[^%]/$&/g);
-#    return map { sprintf $format, @{$_} } cartesian(@args);
-#}
+    for (1 .. $MORE_THAN_ENOUGH) {
+        (my $rv = (caller(1 + $level))[$CALLER_SUBROUTINE]) =~ s/.*:://smx;
+        if ($rv ne '(eval)') {
+            return $rv;
+        }
+        $level++;
+    }
+    return;
+}
 
-# kinda works like ~~ with the following exceptions:
-# with 0 args returns fales
-# with 1 arg returns arg
-# with >2 args returns arg1 ~~ [arg2, arg3, ...]
-# with 2 arg
-#  if both args are defined scalars then returns "arg2 string contains arg1"  (that's the main point)
-#  if arg1 is scalar and arg2 is scalar ref then returns $arg1 ~~ $$arg2
+sub is_valid {
+    my $value     = shift;
+    my $validator = shift;
 
-#sub kinda {
-#    my @args = @_;
-#
-#    my $nargs = scalar @args // return;  # false for no arg
-#    if ($nargs == 1) {
-#        return $args[0];                 # itself for one arg
-#    }
-#    if ($nargs > 2) {
-#        my $arg1 = shift @args;
-#        return kinda($arg1, \@args);     #convert 2 .. args to one arrayref
-#    }
-#    my ($arg1, $arg2) = @args;
-#    if (!ref $arg1 && defined $arg1 && !ref $arg2 && defined $arg2) {
-#        return
-#            index($arg1, $arg2) > -1
-#            ; # if both are strings (can be numbers), returns "arg2 contains arg1"
-#    }
-#    if (!ref $arg1 && ref($arg2) eq 'SCALAR') {
-#        return $arg1 ~~ $$arg2
-#            ; # if arg1 is strings (or number) and arg2 is , returns "arg2 contains arg1"
-#    }
-#}
+    return _is_valid($value, $validator);
+}
+
+# less strict then is_valid: for HASH ref, key has to exist but need not be true
+sub is_in {
+    my @args = @_;
+
+    my $value = shift @args;
+    my $validator = ref $args[0] ? shift @args : \@args;
+
+    return +(any { undef_safe_eq($value, $_) } @{$validator});  # ? 1 : (); #();
+}
+
+sub _is_valid {
+    my $value     = shift;
+    my $validator = shift;
+
+    my $dispatcher_hr = {
+        q{} => sub { undef_safe_eq($value, $validator) },
+        Regexp => sub { defined $value && !!($value =~ /$validator/smx) },
+## no critic(RequireCheckingReturnValueOfEval)
+        HASH => sub {
+            eval { $validator->{$value} };
+        },  # eval for ->{undef}
+## use critic
+        ARRAY => sub {
+            any { undef_safe_eq($value, $_) } @{$validator};
+        },
+        CODE => sub { !!&{$validator}($value) },
+    };  # end of hr
+    return &{
+        $dispatcher_hr->{ ref $validator }
+            || sub { }
+    }($validator) ? 1 : ();
+}
+
+sub act_on {
+    my $actor = pop;    # NOTE: not shift - mandatory last / 2nd arg
+    my $value = shift;  # optional 1st arg
+
+    my $dispatcher_hr = {
+        q{}    => sub { $actor },
+        Regexp => sub { defined $value ? $value =~ /$actor/smx : () }
+        ,               # note it returns grouping result if wantarray
+## no critic(RequireCheckingReturnValueOfEval)
+        HASH => sub {
+            eval { $actor->{$value} };
+        },
+## use critic
+        CODE => sub { &{$actor}($value) },
+    };
+    return &{
+        $dispatcher_hr->{ ref $actor }
+            || sub { }
+    }($actor);
+}
+
+sub hr_minus {
+    my ($hr, @minus) = @_;
+
+    return +{ map { $_ => $hr->{$_} } grep { !($_ ~~ \@minus) } keys %{$hr} };
+}
+
+sub hr_grep {
+    my ($hr, @only) = @_;
+
+    return +{ map { $_ => $hr->{$_} } grep { $_ ~~ \@only } keys %{$hr} };
+}
+
+sub put_first {
+    my ($firsts_ar, @args) = @_;
+
+    if ('HASH' eq ref $firsts_ar) {
+        $firsts_ar = [ keys %{$firsts_ar} ];
+    }
+
+    return +(grep { $_ ~~ @args } @{$firsts_ar}),
+        grep { !($_ ~~ @{$firsts_ar}) } @args;
+}
+
+sub canonpath {
+    my $file  = shift;
+    my $lcwin = shift;  # optional
+
+    my $slashend = $file =~ s {[\\/]+$}{}smx ? q{/} : q{};
+    my $rv = (realpath $file) . $slashend;
+    if ($OSNAME =~ /win/smxi) {
+        $rv =~ y{\\}{/};
+        if ($lcwin) {
+            $rv = lc $rv;
+            $rv =~ s{^([[:alpha:]])(:/.+)}{\u$1$2}smx
+                ;       # drive letter is upper case anyway
+        }
+    }
+    return $rv;
+}
+
+sub flat_dump {
+    my @args = @_;
+
+    my $rv = dump @args;
+
+    $rv =~ s/^\h*\#[^\n]*//smxg;
+    $rv =~ s/\h*\r?\n\h*/ /smxg;
+    $rv =~ s/\h+=>\h+/ => /smxg;
+    $rv =~ s/,\h+/, /smxg;
+
+    return $rv;
+}
+
+sub report_ref {
+    my @args = @_;
+
+    return join q{ }, map {
+             !ref $_             ? $_
+            : ref $_ eq 'SCALAR' ? flat_dump(${$_})
+            : flat_dump($_)
+    } @args;
+}
 
 1;
 

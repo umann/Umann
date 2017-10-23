@@ -1,29 +1,35 @@
 package Umann;
 
-use 5.010000;
-
-use version; $VERSION = qv('0.01');
+use 5.010;
 
 use strict;
 use warnings;
 
+our $VERSION = 0.001;
+
 use Carp;
 use Data::Dump qw(dump);
 use Scalar::Util qw(blessed);
+
 use Umann::Scalar::Util qw(is_hr);
+use Umann::Util qw(deep_copy);
 
 my $global_errstr;
 
 sub new {
-    my $this  = shift;
+    my @args = @_;
+
+    my $this = shift @args;
+    my $arg  = shift @args;
+
     my $class = ref $this || $this;
-    my $self  = shift || {};
-    
-    if(!is_hr($self)) {
-       croak 'arg must be HASH ref: ' . dump $self;
+    my $self = deep_copy($arg) || {};
+
+    if (!is_hr($self)) {
+        croak 'arg must be HASH ref: ' . dump $self;
     }
-    if(@_) {
-        carp 'further args ignored: ' . dump @_;
+    if (@args) {
+        carp 'further args ignored: ' . dump @args;
     }
     if ($self->{__test_failed_new__}) {
         return set_errstr('errstr for __test_failed_new__');
@@ -32,23 +38,23 @@ sub new {
 }
 
 sub set_errstr {
-    my $self       = shift;
+    my $self = shift;
     $global_errstr = shift;
 
     # called as function:
     if (!blessed $self) {
-        $global_errstr = $self; # unshift
+        $global_errstr = $self;  # unshift
         return;
     }
-    
+
     # called as method:
-    if($self->{RaiseError}) {
+    if ($self->{RaiseError}) {
         croak $global_errstr;
     }
-    if($self->{PrintError} || !exists $self->{PrintError}) {
-        carp  $global_errstr ;
-    }       
-    
+    if ($self->{PrintError} || !exists $self->{PrintError}) {
+        carp $global_errstr ;
+    }
+
     $self->{errstr} = $global_errstr;
     return;
 }
@@ -73,16 +79,16 @@ This document describes Umann version 0.0.1
 =head1 SYNOPSIS
 
   package Umann::Whatever
-  
+
   use parent qw(Umann);
-  
+
   ...
 
   use Umann::Whatever;
-  
+
   my $uw = Umann::Whatever->new({foo => 'bar'}) || die Umann::Whatever->errstr;
   $uw->fornicate || die $uw->errstr;
-  
+
 =head1 DESCRIPTION
 
 =head1 SUBROUTINES/METHODS
@@ -125,7 +131,7 @@ Takes no argument. Returns last error string of the object (or undef if none)
 
 =item set_errstr
 
-Takes a string as argument. 
+Takes a string as argument.
 Prints string to STDERR if PrintError was set.
 Carps if RaiseError was set.
 Returns undef if RaiseError was not set.
@@ -142,7 +148,7 @@ Returns undef if RaiseError was not set.
  }
 
 =back
- 
+
 =head1 DIAGNOSTICS
 
 A list of every error and warning message that the module can generate
@@ -166,7 +172,7 @@ No known.
 
 =head1 BUGS AND LIMITATIONS
 
-No known. 
+No known.
 
 =head1 AUTHOR
 
