@@ -25,7 +25,7 @@ use Encode qw(decode_utf8);
 use Umann::List::Util qw(is_in do_on_struct);
 use Umann::Util qw(deep_copy);
 use Umann::Scalar::Util qw(is_cr is_sr);
-use Umann::Validator qw(enum_0th_default validate_obj_method);
+use Umann::Validator qw(enum_0th_default validate_obj_method validate_func);
 
 Readonly my $JSON_SCHEMA_SCALAR => [ 'number', 'string', 'null' ];
 Readonly my $JSON_SCHEMA_PERL_BOOL => $JSON_SCHEMA_SCALAR;
@@ -39,7 +39,7 @@ qr{\A(?:([[:alpha:]]:)?(?:[/\\]{1,2}))?(?:$BASENAME_RE[/\\])*$BASENAME_RE$EXT_RE
 );
 Readonly my %JSON_SCHEMA_FILE_NAME => (
     type    => 'string',
-    pattern => '\s',
+    pattern => '.*',
 );
 Readonly my %JSON_SCHEMA_CONTENT => (type => 'string');
 
@@ -146,8 +146,8 @@ sub get_content {
 
 sub read_content {
     my @args = @_;
-
-    my ($self, $filename) = validate_obj_method(
+    my $self = shift @args;
+    my ($filename) = validate_func(
         {
             quantifier => q{?},
             default    => sub { $self->get_filename },
@@ -369,7 +369,7 @@ sub set_exiftool_values {
     my %hash = 1 == scalar @args ? %{ $args[0] // {} } : @args;
 
     if (%hash) {
-        $self->do_frame(exiftool => \&{_set_exiftool_values}, \%hash);
+        $self->do_frame(exiftool => \&_set_exiftool_values, \%hash);
     }
     return $self;
 }
@@ -389,18 +389,18 @@ sub _do_tmp {
 sub do_frame {
     my ($self, $frame, $sub, @args_for_method) = @_;
 
-    state $hr => {
+    state $hr = {
         new => {
-            magick   => \&{_new_magick},
-            exiftool => \&{_new_exiftool},
+            magick   => \&_new_magick,
+            exiftool => \&_new_exiftool,
         },
         end => {
-            magick   => \&{_end_magick},
-            exiftool => \&{_end_exiftool},
+            magick   => \&_end_magick,
+            exiftool => \&_end_exiftool,
         },
-        }
+    };
 
-        my $frame_obj = &{ hr->{new} }($self);
+    my $frame_obj = &{ $hr->{new} }($self);
 
     my @all_args = ($self, $frame_obj, @args_for_method);
 
@@ -409,7 +409,7 @@ sub do_frame {
         ? &{$sub}(@all_args)
         : (scalar &{$sub}(@all_args));
 
-    &{ hr->{end} }($self, $frame_obj);
+    &{ $hr->{end} }($self, $frame_obj);
 
     return wantarray ? @rv : $rv[0];
 }
